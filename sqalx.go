@@ -153,6 +153,8 @@ func (n node) Beginx() (Node, error) {
 	case n.tx == nil:
 		// new actual transaction
 		n.tx, err = n.db.Beginx()
+		// values are scoped to each transaction
+		n.smap = new(sync.Map)
 		n.Driver = n.tx
 	case n.savePointEnabled:
 		// already in a transaction: using savepoints
