@@ -92,11 +92,10 @@ type Driver interface {
 // New creates a new Node with the given DB.
 func New(db *sqlx.DB, options ...Option) (Node, error) {
 	n := node{
-		db:         db,
-		Driver:     db,
-		smap:       new(sync.Map),
-		onCommit:   &[]func(){},
-		onRollback: &[]func(){},
+		db:       db,
+		Driver:   db,
+		smap:     new(sync.Map),
+		deferred: &deferredFuncs{},
 	}
 
 	for _, opt := range options {
@@ -112,11 +111,10 @@ func New(db *sqlx.DB, options ...Option) (Node, error) {
 // NewFromTransaction creates a new Node from the given transaction.
 func NewFromTransaction(tx *sqlx.Tx, options ...Option) (Node, error) {
 	n := node{
-		tx:         tx,
-		Driver:     tx,
-		smap:       new(sync.Map),
-		onCommit:   &[]func(){},
-		onRollback: &[]func(){},
+		tx:       tx,
+		Driver:   tx,
+		smap:     new(sync.Map),
+		deferred: &deferredFuncs{},
 	}
 
 	for _, opt := range options {
@@ -147,13 +145,17 @@ func Connect(driverName, dataSourceName string, options ...Option) (Node, error)
 	return node, nil
 }
 
+type deferredFuncs struct {
+	onCommit   []func()
+	onRollback []func()
+}
+
 type node struct {
 	Driver
 	db               *sqlx.DB
 	tx               *sqlx.Tx
 	smap             *sync.Map
-	onCommit         *[]func()
-	onRollback       *[]func()
+	deferred         *deferredFuncs
 	savePointID      string
 	savePointEnabled bool
 	nested           bool
@@ -172,8 +174,7 @@ func (n node) Beginx() (Node, error) {
 		n.tx, err = n.db.Beginx()
 		// values are scoped to each transaction
 		n.smap = new(sync.Map)
-		n.onCommit = &[]func(){}
-		n.onRollback = &[]func(){}
+		n.deferred = &deferredFuncs{}
 		n.Driver = n.tx
 	case n.savePointEnabled:
 		// already in a transaction: using savepoints
@@ -216,7 +217,7 @@ func (n *node) Rollback() error {
 	n.Driver = nil
 
 	if actuallyRolledback {
-		go executeDeferrred(n.onRollback)
+		go executeDeferrred(n.deferred.onRollback)
 	}
 
 	return nil
@@ -245,7 +246,7 @@ func (n *node) Commit() error {
 	n.Driver = nil
 
 	if actuallyCommitted {
-		go executeDeferrred(n.onCommit)
+		go executeDeferrred(n.deferred.onCommit)
 	}
 
 	return nil
@@ -299,8 +300,7 @@ func (n *node) Range(f func(key, value interface{}) bool) {
 // After the transaction commits, its deferred calls are executed in
 // last-in-first-out order.
 func (n *node) DeferToCommit(f func()) {
-	a := append(*n.onCommit, f)
-	n.onCommit = &a
+	n.deferred.onCommit = append(n.deferred.onCommit, f)
 }
 
 // DeferToRollback defers the execution of the given function until (if) the
@@ -308,13 +308,12 @@ func (n *node) DeferToCommit(f func()) {
 // After the transaction aborts, its deferred calls are executed in
 // last-in-first-out order.
 func (n *node) DeferToRollback(f func()) {
-	a := append(*n.onRollback, f)
-	n.onRollback = &a
+	n.deferred.onRollback = append(n.deferred.onRollback, f)
 }
 
-func executeDeferrred(funcs *[]func()) {
-	for i := len(*funcs) - 1; i >= 0; i-- {
-		(*funcs)[i]()
+func executeDeferrred(funcs []func()) {
+	for i := len(funcs) - 1; i >= 0; i-- {
+		funcs[i]()
 	}
 }
 
