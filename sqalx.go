@@ -58,6 +58,17 @@ type Node interface {
 	// Range may be O(N) with the number of elements in the map even if f returns
 	// false after a constant number of calls.
 	Range(f func(key, value interface{}) bool)
+
+	// DeferToCommit defers the execution of the given function until (if) the
+	// transaction is committed. Deferred function calls are pushed onto a stack.
+	// After the transaction commits, its deferred calls are executed in a
+	// different goroutine, in last-in-first-out order.
+	DeferToCommit(f func())
+	// DeferToRollback defers the execution of the given function until (if) the
+	// transaction is aborted. Deferred function calls are pushed onto a stack.
+	// After the transaction aborts, its deferred calls are executed in a
+	// different goroutine, in last-in-first-out order.
+	DeferToRollback(f func())
 }
 
 // A Driver can query the database. It can either be a *sqlx.DB or a *sqlx.Tx
@@ -81,9 +92,11 @@ type Driver interface {
 // New creates a new Node with the given DB.
 func New(db *sqlx.DB, options ...Option) (Node, error) {
 	n := node{
-		db:     db,
-		Driver: db,
-		smap:   new(sync.Map),
+		db:         db,
+		Driver:     db,
+		smap:       new(sync.Map),
+		onCommit:   &[]func(){},
+		onRollback: &[]func(){},
 	}
 
 	for _, opt := range options {
@@ -99,9 +112,11 @@ func New(db *sqlx.DB, options ...Option) (Node, error) {
 // NewFromTransaction creates a new Node from the given transaction.
 func NewFromTransaction(tx *sqlx.Tx, options ...Option) (Node, error) {
 	n := node{
-		tx:     tx,
-		Driver: tx,
-		smap:   new(sync.Map),
+		tx:         tx,
+		Driver:     tx,
+		smap:       new(sync.Map),
+		onCommit:   &[]func(){},
+		onRollback: &[]func(){},
 	}
 
 	for _, opt := range options {
@@ -137,6 +152,8 @@ type node struct {
 	db               *sqlx.DB
 	tx               *sqlx.Tx
 	smap             *sync.Map
+	onCommit         *[]func()
+	onRollback       *[]func()
 	savePointID      string
 	savePointEnabled bool
 	nested           bool
@@ -155,6 +172,8 @@ func (n node) Beginx() (Node, error) {
 		n.tx, err = n.db.Beginx()
 		// values are scoped to each transaction
 		n.smap = new(sync.Map)
+		n.onCommit = &[]func(){}
+		n.onRollback = &[]func(){}
 		n.Driver = n.tx
 	case n.savePointEnabled:
 		// already in a transaction: using savepoints
@@ -180,11 +199,13 @@ func (n *node) Rollback() error {
 	}
 
 	var err error
+	actuallyRolledback := false
 
 	if n.savePointEnabled && n.savePointID != "" {
 		_, err = n.tx.Exec("ROLLBACK TO SAVEPOINT " + n.savePointID)
 	} else if !n.nested {
 		err = n.tx.Rollback()
+		actuallyRolledback = true
 	}
 
 	if err != nil {
@@ -193,6 +214,10 @@ func (n *node) Rollback() error {
 
 	n.tx = nil
 	n.Driver = nil
+
+	if actuallyRolledback {
+		go executeDeferrred(n.onRollback)
+	}
 
 	return nil
 }
@@ -203,11 +228,13 @@ func (n *node) Commit() error {
 	}
 
 	var err error
+	actuallyCommitted := false
 
 	if n.savePointID != "" {
 		_, err = n.tx.Exec("RELEASE SAVEPOINT " + n.savePointID)
 	} else if !n.nested {
 		err = n.tx.Commit()
+		actuallyCommitted = true
 	}
 
 	if err != nil {
@@ -216,6 +243,10 @@ func (n *node) Commit() error {
 
 	n.tx = nil
 	n.Driver = nil
+
+	if actuallyCommitted {
+		go executeDeferrred(n.onCommit)
+	}
 
 	return nil
 }
@@ -261,6 +292,30 @@ func (n *node) Delete(key interface{}) {
 // false after a constant number of calls.
 func (n *node) Range(f func(key, value interface{}) bool) {
 	n.smap.Range(f)
+}
+
+// DeferToCommit defers the execution of the given function until (if) the
+// transaction is committed. Deferred function calls are pushed onto a stack.
+// After the transaction commits, its deferred calls are executed in
+// last-in-first-out order.
+func (n *node) DeferToCommit(f func()) {
+	a := append(*n.onCommit, f)
+	n.onCommit = &a
+}
+
+// DeferToRollback defers the execution of the given function until (if) the
+// transaction is aborted. Deferred function calls are pushed onto a stack.
+// After the transaction aborts, its deferred calls are executed in
+// last-in-first-out order.
+func (n *node) DeferToRollback(f func()) {
+	a := append(*n.onRollback, f)
+	n.onRollback = &a
+}
+
+func executeDeferrred(funcs *[]func()) {
+	for i := len(*funcs) - 1; i >= 0; i-- {
+		(*funcs)[i]()
+	}
 }
 
 // Option to configure sqalx
