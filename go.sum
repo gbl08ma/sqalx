@@ -6,6 +6,8 @@ github.com/davecgh/go-spew v1.1.1/go.mod h1:J7Y8YcW2NihsgmVo/mv3lAwl/skON4iLHjSs
 github.com/go-sql-driver/mysql v1.4.0 h1:7LxgVwFb2hIQtMm87NdgAVfXjnt4OePseqT1tKx+opk=
 github.com/go-sql-driver/mysql v1.4.0/go.mod h1:zAC/RDZ24gD3HViQzih4MyKcchzm+sOG5ZlKdlhCg5w=
 github.com/golang/protobuf v1.2.0/go.mod h1:6lQm79b+lXiMfvg/cZm0SGofjICqVBUtrP5yJMmIC1U=
+github.com/heetch/sqalx v0.4.0 h1:itQcEQuDY7GuUbSt4+urrRTNDWhM9bh9lJLWxnImqPQ=
+github.com/heetch/sqalx v0.4.0/go.mod h1:E94nHyvfKEeIbbcHTc7eZSifTAOLES5Kz8gU04iZIgc=
 github.com/jmoiron/sqlx v0.0.0-20190426154859-38398a30ed85 h1:+LZtdhpMITOXE+MztQPPcwUl+eqYjwlXXLHrd0yWlxw=
 github.com/jmoiron/sqlx v0.0.0-20190426154859-38398a30ed85/go.mod h1:1FEQNm3xlJgrMD+FBdI9+xvCksHtbpVBBw5dYhBSsks=
 github.com/lib/pq v1.0.0 h1:X5PMW56eZitiTeO7tKzZxFCSpbFZJtkMMooicw2us9A=
