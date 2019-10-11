@@ -81,6 +81,7 @@ type Driver interface {
 	sqlx.ExecerContext
 	sqlx.Queryer
 	sqlx.QueryerContext
+	QueryRow(string, ...interface{}) *sql.Row
 	QueryRowContext(context.Context, string, ...interface{}) *sql.Row
 	sqlx.Preparer
 	sqlx.PreparerContext
