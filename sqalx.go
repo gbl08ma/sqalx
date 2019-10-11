@@ -1,6 +1,7 @@
 package sqalx
 
 import (
+	"context"
 	"database/sql"
 	"errors"
 	"strings"
@@ -80,6 +81,7 @@ type Driver interface {
 	sqlx.ExecerContext
 	sqlx.Queryer
 	sqlx.QueryerContext
+	QueryRowContext(context.Context, string, ...interface{}) *sql.Row
 	sqlx.Preparer
 	sqlx.PreparerContext
 	BindNamed(query string, arg interface{}) (string, []interface{}, error)
